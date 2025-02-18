@@ -1,0 +1,1270 @@
+// ==UserScript==
+// @name         Learnster AI Helper (OpenRouter) - Local DB & Enhanced
+// @match        https://ica.learnster.com/*
+// @grant        GM_xmlhttpRequest
+// @grant        GM_getValue
+// @grant        GM_setValue
+// @grant        GM_addStyle
+// ==/UserScript==
+
+(function() {
+    'use strict';
+
+    // Configuration object
+    const CONFIG = {
+        apiKey: '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', // OpenRouter API Key
+        apiUrl: 'https://openrouter.ai/api/v1/chat/completions',  // OpenRouter Chat Completions Endpoint
+        model: 'google/gemini-2.0-pro-exp-02-05:free', // The model name
+        dbName: 'learnster_qa_db',
+        autoSubmit: false,
+        darkMode: false,
+        promptTemplate: '',
+        autoSaveNewQuestions: true
+    };
+
+    // (Rest of the CSS and other functions like createDialog, createBubble, etc. remain the same)
+    // ... (ضع باقي الكود هنا، كل الوظائف الأخرى مثل createDialog, createBubble, ... تبقى كما هي) ...
+    GM_addStyle(`
+        /* Animations */
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(-10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        @keyframes slideIn {
+            from { transform: translateX(100%); }
+            to { transform: translateX(0); }
+        }
+
+        /* Enhanced Bubble and Settings Button */
+        #ai-helper-bubble-container {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            z-index: 9999;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            animation: fadeIn 0.3s ease-out;
+        }
+
+        #ai-helper-bubble,
+        #ai-helper-settings-button {
+            padding: 0;
+            background-color: #4CAF50;
+            color: white;
+            border-radius: 50%;
+            cursor: pointer;
+            width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            transition: all 0.3s ease;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+            border: none;
+        }
+
+        #ai-helper-settings-button {
+            background-color: #607D8B;
+        }
+
+        #ai-helper-bubble:hover,
+        #ai-helper-settings-button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+        }
+
+        /* Enhanced Dialog Styles */
+        #ai-helper-dialog {
+            position: fixed;
+            top: 60px;
+            right: 10px;
+            background-color: #fff;
+            border-radius: 10px;
+            padding: 20px;
+            z-index: 10000;
+            max-width: 400px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            animation: slideIn 0.3s ease-out;
+            border: none;
+        }
+
+        #ai-helper-dialog p {
+            margin: 10px 0;
+            line-height: 1.5;
+        }
+
+        #ai-helper-dialog button {
+            padding: 8px 16px;
+            margin: 5px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 500;
+            transition: all 0.2s ease;
+        }
+
+        #ai-helper-dialog .save-button {
+            background: linear-gradient(145deg, #4CAF50, #45a049);
+            color: white;
+        }
+
+        #ai-helper-dialog .update-button {
+            background: linear-gradient(145deg, #2196F3, #1976D2);
+            color: white;
+        }
+
+        #ai-helper-dialog .delete-button {
+            background: linear-gradient(145deg, #f44336, #d32f2f);
+            color: white;
+        }
+
+        #ai-helper-dialog .close-button {
+            background: linear-gradient(145deg, #9E9E9E, #757575);
+            color: white;
+        }
+
+        #ai-helper-dialog button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+        }
+
+        /* Enhanced Settings Dialog */
+        #ai-helper-settings-dialog {
+            position: fixed;
+            top: 60px;
+            right: 10px;
+            background-color: white;
+            border-radius: 10px;
+            padding: 20px;
+            z-index: 10002;
+            min-width: 300px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            animation: fadeIn 0.3s ease-out;
+        }
+
+        #ai-helper-settings-dialog h3 {
+            margin: 0 0 15px 0;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #eee;
+            color: #333;
+        }
+
+        #ai-helper-settings-dialog .button-group {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px;
+            margin-top: 15px;
+        }
+
+        #ai-helper-settings-dialog button {
+            padding: 8px 12px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 500;
+            transition: all 0.2s ease;
+            text-align: center;
+        }
+
+        /* Dark Mode Styles */
+        .dark-mode #ai-helper-dialog,
+        .dark-mode #ai-helper-settings-dialog,
+        .dark-mode #ai-helper-update-dialog,
+        .dark-mode #ai-helper-db-dialog {
+            background-color: #2d2d2d;
+            color: #ffffff;
+        }
+
+        .dark-mode input[type="text"] {
+            background-color: #404040;
+            color: #ffffff;
+            border-color: #555555;
+        }
+
+        .dark-mode table td,
+        .dark-mode table th {
+            border-color: #404040;
+        }
+
+        /* Database Dialog Enhancements */
+        #ai-helper-db-dialog {
+            background-color: white;
+            border-radius: 10px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            animation: fadeIn 0.3s ease-out;
+        }
+
+        #ai-helper-db-dialog table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 10px 0;
+        }
+
+        #ai-helper-db-dialog th,
+        #ai-helper-db-dialog td {
+            padding: 10px;
+            border: 1px solid #eee;
+            text-align: left;
+        }
+
+        #ai-helper-db-dialog th {
+            background-color: #f5f5f5;
+            font-weight: bold;
+        }
+    `);
+
+    // Add dark mode styles
+    const darkModeStyles = `
+        .dark-mode #ai-helper-dialog,
+        .dark-mode #ai-helper-settings-dialog,
+        .dark-mode #ai-helper-update-dialog,
+        .dark-mode #ai-helper-db-dialog {
+            background-color: #2d2d2d;
+            color: #ffffff;
+            border-color: #404040;
+        }
+
+        .dark-mode input[type="text"] {
+            background-color: #404040;
+            color: #ffffff;
+            border-color: #555555;
+        }
+
+        .dark-mode table td,
+        .dark-mode table th {
+            border-color: #404040;
+        }
+    `;
+    GM_addStyle(darkModeStyles);
+
+    // Enhanced error handling
+    class AIHelperError extends Error {
+        constructor(message, type) {
+            super(message);
+            this.name = 'AIHelperError';
+            this.type = type;
+        }
+    }
+
+      // New feature: Analytics tracking
+    const Analytics = {
+        data: {},
+
+        track(event, data) {
+            if (!this.data[event]) {
+                this.data[event] = [];
+            }
+            this.data[event].push({
+                timestamp: new Date(),
+                ...data
+            });
+            this.save();
+        },
+
+        save() {
+            GM_setValue('analytics_data', JSON.stringify(this.data));
+        },
+
+        getStats() {
+            return {
+                totalQuestions: this.data.questionProcessed?.length || 0,
+                correctAnswers: this.data.correctAnswer?.length || 0,
+                apiCalls: this.data.apiCall?.length || 0
+            };
+        }
+    };
+
+    // New feature: Question cache
+    class QuestionCache {
+        constructor() {
+            this.cache = new Map();
+            this.maxSize = 100;
+        }
+
+        set(question, answer) {
+            if (this.cache.size >= this.maxSize) {
+                const firstKey = this.cache.keys().next().value;
+                this.cache.delete(firstKey);
+            }
+            this.cache.set(question, {
+                answer,
+                timestamp: Date.now()
+            });
+        }
+
+        get(question) {
+            const cached = this.cache.get(question);
+            if (cached && Date.now() - cached.timestamp < 3600000) { // 1 hour cache
+                return cached.answer;
+            }
+            return null;
+        }
+    }
+
+    const questionCache = new QuestionCache();
+
+     // New feature: Performance monitoring
+    const PerformanceMonitor = {
+        metrics: {},
+
+        start(operation) {
+            this.metrics[operation] = {
+                startTime: performance.now()
+            };
+        },
+
+        end(operation) {
+            if (this.metrics[operation]) {
+                const duration = performance.now() - this.metrics[operation].startTime;
+                Analytics.track('performance', {
+                    operation,
+                    duration
+                });
+            }
+        }
+    };
+
+    let bubble;
+    let dialog;
+    let isMinimized = false;
+    let settingsDialog;
+
+    // === CSS (using GM_addStyle) ===
+    GM_addStyle(`
+       body {
+            font-family: 'Roboto', sans-serif;
+            line-height: 1.6;
+        }
+
+        /* Dialog */
+       #ai-helper-dialog {
+            position: fixed;
+            top: 50px;
+            right: 10px;
+            background-color: #fff;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 20px;
+            z-index: 10000;
+            max-width: 400px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+            display: none;
+            flex-direction: column;
+        }
+
+        #ai-helper-dialog p {
+            margin-bottom: 10px;
+        }
+
+        #ai-helper-dialog button {
+            padding: 8px 12px;
+            margin-top: 5px;
+            margin-right: 5px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background-color: 0.2s, transform 0.1s;
+            font-size: 14px;
+        }
+
+        #ai-helper-dialog button:hover {
+            transform: translateY(-2px);
+        }
+
+        #ai-helper-dialog button:active {
+            transform: translateY(0);
+        }
+
+        #ai-helper-dialog .save-button {
+            background-color: #4CAF50;
+            color: white;
+        }
+        #ai-helper-dialog .update-button{
+            background-color: #007bff;
+            color: white;
+        }
+
+
+        #ai-helper-dialog .delete-button {
+            background-color: #f44336;
+            color: white;
+        }
+
+        #ai-helper-dialog .close-button {
+            background-color: #ccc;
+            color: #333;
+        }
+
+        /* Update Dialog */
+        #ai-helper-update-dialog {
+            position: fixed;
+             top: 50px;
+            right: 10px;
+            background-color: #fff;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 20px;
+            z-index: 10001;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+        }
+
+        #ai-helper-update-dialog h3{
+            margin-top: 0;
+        }
+
+        #ai-helper-update-dialog input[type="text"] {
+            padding: 6px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            margin-bottom: 5px;
+            width: 100%;
+        }
+        #ai-helper-update-dialog .add-answer-button {
+        background-color: #28a745;
+        color: white;
+        }
+        #ai-helper-update-dialog .save-changes-button{
+            background-color: #007bff;
+            color: white;
+        }
+        #ai-helper-update-dialog .cancel-button{
+        background-color: #ccc;
+            color: #333;
+        }
+        #ai-helper-update-dialog .delete-button{
+        width: 25px;
+            height: 25px;
+            margin-left: 5px;
+            background-color: #f44336;
+            color: white;
+        }
+
+
+        /* Bubble and Settings Button */
+        #ai-helper-bubble-container {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            z-index: 9999;
+            display: flex;
+            align-items: center;
+        }
+
+        #ai-helper-bubble,
+        #ai-helper-settings-button {
+            padding: 5px 10px;
+            background-color: #4CAF50;
+            color: white;
+            border-radius: 50%;
+            cursor: pointer;
+            width: 30px;
+            height: 30px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-right: 5px;
+            transition: background-color: 0.2s, opacity 0.2s;
+        }
+        #ai-helper-settings-button{
+        background-color: #607D8B;
+        }
+
+        #ai-helper-bubble:hover,
+        #ai-helper-settings-button:hover {
+            background-color: #367c39;
+        }
+
+        /* Settings Dialog */
+        #ai-helper-settings-dialog {
+            position: fixed;
+            top: 50px;
+            right: 10px;
+            background-color: white;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 15px;
+            z-index: 10002;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+            display: none;
+        }
+
+        #ai-helper-settings-dialog h3 {
+            margin-top: 0;
+            margin-bottom: 15px;
+            font-size: 18px;
+            color: #333;
+            border-bottom: 1px solid #eee;
+            padding-bottom: 5px;
+        }
+        #ai-helper-settings-dialog .button-group{
+          margin-top: 5px;
+        }
+
+        #ai-helper-settings-dialog button {
+            padding: 6px 10px;
+            margin-right: 5px;
+            margin-bottom: 5px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            background-color: #f0f0f0;
+            color: #333;
+            transition: background-color: 0.2s;
+        }
+
+        #ai-helper-settings-dialog button:hover {
+            background-color: #e0e0e0;
+        }
+
+        #ai-helper-settings-dialog .export-button {
+            background-color: #28a745;
+            color: white;
+        }
+
+        #ai-helper-settings-dialog .import-button {
+            background-color: #007bff;
+            color: white;
+        }
+        #ai-helper-settings-dialog .show-db-button{
+          background-color: #9C27B0;
+          color: white;
+        }
+          #ai-helper-settings-dialog .auto-submit-button {
+            background-color: #2196F3;
+            color: white;
+        }
+
+        #ai-helper-settings-dialog .dark-mode-toggle {
+             background-color: #607D8B;
+              color: white;
+        }
+
+        #ai-helper-settings-dialog .cancel-button {
+            background-color: #ccc;
+        }
+         #ai-helper-settings-dialog .auto-save-button {
+            background-color: #4CAF50;
+            color: white;
+        }
+
+        /* Database Dialog */
+        #ai-helper-db-dialog {
+            position: fixed;
+            top: 100px;
+            right: 10px;
+            background-color: white;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 15px;
+            z-index: 10003;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        #ai-helper-db-dialog h3 {
+            margin-top: 0;
+            margin-bottom: 10px;
+            font-size: 16px;
+            color: #333;
+        }
+        #ai-helper-db-dialog .close-button{
+          background-color: #ccc;
+            color: #333;
+        }
+    `);
+
+    // === Database Functions (localStorage) ===
+
+    function loadDatabase() {
+        try {
+            const storedData = GM_getValue(CONFIG.dbName);
+            return storedData ? JSON.parse(storedData) : {};
+        } catch (e) {
+            console.error("Error loading database:", e);
+            return {};
+        }
+    }
+
+    function saveDatabase(db) {
+        try {
+            GM_setValue(CONFIG.dbName, JSON.stringify(db));
+        } catch (e) {
+            console.error("Error saving database:", e);
+        }
+    }
+      function getAnswerFromDB(question) {
+        const db = loadDatabase();
+        return db[question];
+    }
+    function storeAnswerInDB(question, correctAnswers) {
+        if (!CONFIG.autoSaveNewQuestions) {
+            return; // Don't save if auto-save is off
+        }
+        const db = loadDatabase();
+        // Use questionCache *before* storing in the persistent database
+        questionCache.set(question, correctAnswers);
+
+        if (!db[question]) {
+            db[question] = correctAnswers;
+            saveDatabase(db);
+            Analytics.track('newAnswerStored', { question }); // Track new answers
+        }
+    }
+
+
+    function updateAnswerInDB(question, newCorrectAnswers) {
+        const db = loadDatabase();
+        // Update questionCache
+        questionCache.set(question, newCorrectAnswers);
+
+        db[question] = newCorrectAnswers;
+        saveDatabase(db);
+    }
+
+    // === UI Creation Functions ===
+
+    function createDialog(question, options, aiResponse, isMultipleChoice, correctAnswerFromDb) {
+       if (dialog) {
+            dialog.remove();
+        }
+
+        dialog = document.createElement('div');
+        dialog.id = 'ai-helper-dialog';
+        dialog.style.cssText = `
+            display: flex;
+        `;
+        if (CONFIG.darkMode) {
+           dialog.classList.add('dark-mode');
+        }
+
+
+        const questionPara = document.createElement('p');
+        questionPara.textContent = "Question: " + question;
+        dialog.appendChild(questionPara);
+
+        const aiPara = document.createElement('p');
+        aiPara.style.whiteSpace = "pre-wrap";
+        let displayText = "Answer: ";
+
+        if (correctAnswerFromDb) {
+            displayText += "<span style='color: blue;'> (From Database)</span><br>";
+            displayText += "<span style='color: green;'>" + correctAnswerFromDb.join("<br>") + "</span>";
+        } else {
+            displayText += "<span style='color: green;'>" + aiResponse + "</span>";
+        }
+        aiPara.innerHTML = displayText;
+        dialog.appendChild(aiPara);
+
+
+        const updateButton = document.createElement('button');
+        updateButton.textContent = 'Update Correct Answer';
+        updateButton.classList.add('update-button');
+        updateButton.onclick = () => {
+            const updateDialog = document.createElement('div');
+            updateDialog.id = 'ai-helper-update-dialog';
+            updateDialog.style.cssText = `
+                /* ... (styles from CSS) ... */
+            `;
+            if (CONFIG.darkMode) {
+              updateDialog.classList.add('dark-mode');
+            }
+
+              const title = document.createElement('h3');
+              title.textContent = "Update Correct Answers";
+              updateDialog.appendChild(title);
+
+              const answersContainer = document.createElement('div');
+              updateDialog.appendChild(answersContainer);
+
+                let selectedAnswers = [];
+                    const questionWrapperForUpdate = Array.from(document.querySelectorAll('.question-wrapper')).find(wrapper => { // استخدام اسم متغير مختلف لتجنب الالتباس
+                        const questionTextElement = wrapper.querySelector('h3[aqa-id="questionTitle"]');
+                        return questionTextElement && questionTextElement.textContent.trim() === question;
+                    });
+
+                    if (questionWrapperForUpdate) { // استخدام المتغير الجديد هنا
+                        const isMultipleChoiceNow = questionWrapperForUpdate.querySelector('input[type="checkbox"]') !== null;
+
+                        if (isMultipleChoiceNow) {
+                            const checkedCheckboxes = questionWrapperForUpdate.querySelectorAll('input[type="checkbox"]:checked');
+                            checkedCheckboxes.forEach(checkbox => {
+                                const label = checkbox.closest('.answer-option').querySelector('p');
+                                if (label) {
+                                    selectedAnswers.push(label.textContent.trim());
+                                }
+                            });
+                        } else {
+                            const selectedRadio = questionWrapperForUpdate.querySelector('input[type="radio"]:checked');
+                            if (selectedRadio) {
+                                const label = selectedRadio.closest('.answer-option').querySelector('p');
+                                if (label) {
+                                    selectedAnswers.push(label.textContent.trim());
+                                }
+                            }
+                        }
+                    }
+
+            selectedAnswers.forEach((answer, index) => {
+                const answerRow = document.createElement('div');
+                answerRow.style.marginBottom = '5px';
+
+                const answerInput = document.createElement('input');
+                answerInput.type = 'text';
+                answerInput.value = answer;
+                answerInput.style.width = 'calc(100% - 30px)';
+                answerInput.dataset.index = index;
+                answerRow.appendChild(answerInput);
+
+                const deleteButtons = document.createElement('button');
+                deleteButtons.textContent = 'X';
+                deleteButtons.classList.add('delete-button');
+                deleteButtons.onclick = () => {
+                    answerRow.remove();
+                };
+                answerRow.appendChild(deleteButtons);
+
+                answersContainer.appendChild(answerRow);
+            });
+
+            const addAnswerButton = document.createElement('button');
+                addAnswerButton.textContent = "Add Answer";
+                addAnswerButton.classList.add('add-answer-button');
+                addAnswerButton.onclick = () => {
+                    const answerRow = document.createElement('div');
+                    answerRow.style.marginBottom = '5px';
+
+                    const answerInput = document.createElement('input');
+                    answerInput.type = 'text';
+                    answerInput.style.width = 'calc(100% - 30px)';
+                    answerInput.dataset.index = answersContainer.children.length;
+                    answerRow.appendChild(answerInput);
+
+                  const deleteButtons = document.createElement('button');
+deleteButtons.textContent = 'X';
+deleteButtons.classList.add('delete-button');
+deleteButtons.onclick = () => {
+    answerRow.remove();
+};
+answerRow.appendChild(deleteButtons);
+
+answersContainer.appendChild(answerRow);
+};
+updateDialog.appendChild(addAnswerButton);
+updateDialog.appendChild(document.createElement('br'));
+
+const saveChangesButton = document.createElement('button');
+saveChangesButton.textContent = "Save Changes";
+saveChangesButton.classList.add('save-changes-button');
+const currentQuestionWrapper = questionWrapperForUpdate; // Use the correct variable here!
+saveChangesButton.onclick = () => {
+    const newAnswers = [];
+    const inputFields = answersContainer.querySelectorAll('input');
+    inputFields.forEach(input => {
+        if (input.value.trim() !== "") {
+            newAnswers.push(input.value.trim());
+        }
+    });
+    updateAnswerInDB(question, newAnswers);
+    aiPara.innerHTML = "<span style='color: blue;'> (Updated in Database)</span><br><span style='color: green;'>" + newAnswers.join("<br>") + "</span>";
+    updateDialog.remove();
+    selectAnswersOnPage(currentQuestionWrapper, newAnswers, isMultipleChoice); // Select answers on page after update
+};
+updateDialog.appendChild(saveChangesButton);
+
+const cancelButton = document.createElement('button');
+cancelButton.textContent = "Cancel";
+cancelButton.classList.add('cancel-button');
+cancelButton.onclick = () => {
+    updateDialog.remove();
+};
+updateDialog.appendChild(cancelButton);
+
+document.body.appendChild(updateDialog);
+};
+
+dialog.appendChild(updateButton);
+
+const deleteButton = document.createElement('button');
+deleteButton.textContent = 'Delete Question';
+deleteButton.classList.add('delete-button');
+deleteButton.style.marginRight = "10px";
+deleteButton.onclick = () => {
+    if (confirm("Are you sure you want to delete this question and its answer?")) {
+        const db = loadDatabase();
+        delete db[question];
+        saveDatabase(db);
+        dialog.remove();
+    }
+};
+dialog.appendChild(deleteButton);
+
+const closeButton = document.createElement('button');
+closeButton.textContent = 'Close';
+closeButton.classList.add('close-button');
+closeButton.onclick = () => {
+    dialog.style.display = 'none';
+    isMinimized = true;
+    updateBubbleText();
+};
+dialog.appendChild(closeButton);
+
+document.body.appendChild(dialog);
+}
+
+function createBubble() {
+const container = document.createElement('div');
+container.id = 'ai-helper-bubble-container';
+
+bubble = document.createElement('div');
+bubble.id = 'ai-helper-bubble';
+bubble.textContent = 'AI';
+bubble.onclick = toggleDialog;
+container.appendChild(bubble);
+
+const settingsButton = document.createElement('div');
+settingsButton.id = 'ai-helper-settings-button';
+settingsButton.textContent = '⚙️';
+settingsButton.onclick = toggleSettingsDialog;
+container.appendChild(settingsButton);
+
+document.body.appendChild(container);
+}
+
+function toggleSettingsDialog() {
+if (settingsDialog && settingsDialog.style.display !== 'none') {
+    settingsDialog.style.display = 'none';
+} else {
+    openSettingsDialog();
+}
+}
+
+function applyDarkMode() {
+if (CONFIG.darkMode) {
+    document.body.classList.add('dark-mode');
+} else {
+    document.body.classList.remove('dark-mode');
+}
+}
+
+// Load settings from storage and apply dark mode
+function loadSettings() {
+const savedConfig = GM_getValue('config');
+if (savedConfig) {
+    Object.assign(CONFIG, JSON.parse(savedConfig)); // Merge saved settings
+}
+applyDarkMode(); // Apply dark mode after loading
+}
+
+function openSettingsDialog() {
+if (settingsDialog) {
+    settingsDialog.style.display = 'block';
+    return;
+}
+settingsDialog = document.createElement('div');
+settingsDialog.id = 'ai-helper-settings-dialog';
+settingsDialog.style.display = 'block';
+if (CONFIG.darkMode) {
+    settingsDialog.classList.add('dark-mode');
+}
+
+const title = document.createElement('h3');
+title.textContent = "Database Settings";
+settingsDialog.appendChild(title);
+
+const buttonGroup = document.createElement('div');
+buttonGroup.classList.add('button-group');
+
+const exportButton = document.createElement('button');
+exportButton.textContent = "Export Database";
+exportButton.classList.add('export-button');
+exportButton.onclick = exportDatabase;
+buttonGroup.appendChild(exportButton);
+
+const importButton = document.createElement('button');
+importButton.textContent = "Import Database";
+importButton.classList.add('import-button');
+importButton.onclick = importDatabase;
+buttonGroup.appendChild(importButton);
+
+const showDbButton = document.createElement('button');
+showDbButton.textContent = "Show Database";
+showDbButton.classList.add('show-db-button');
+showDbButton.onclick = showDatabase;
+buttonGroup.appendChild(showDbButton);
+
+// Auto Submit Button
+const autoSubmitButton = document.createElement('button');
+autoSubmitButton.textContent = CONFIG.autoSubmit ? "Auto Submit: ON" : "Auto Submit: OFF";
+autoSubmitButton.classList.add('auto-submit-button');
+autoSubmitButton.onclick = () => {
+    CONFIG.autoSubmit = !CONFIG.autoSubmit;
+    autoSubmitButton.textContent = CONFIG.autoSubmit ? "Auto Submit: ON" : "Auto Submit: OFF";
+    saveSettings();
+
+};
+buttonGroup.appendChild(autoSubmitButton);
+
+// Dark Mode Toggle
+const darkModeToggle = document.createElement('button');
+darkModeToggle.textContent = CONFIG.darkMode ? "Dark Mode: ON" : "Dark Mode: OFF";
+darkModeToggle.classList.add('dark-mode-toggle');
+darkModeToggle.onclick = () => {
+    CONFIG.darkMode = !CONFIG.darkMode;
+    darkModeToggle.textContent = CONFIG.darkMode ? "Dark Mode: ON" : "Dark Mode: OFF";
+    applyDarkMode(); // Apply immediately
+    saveSettings();
+};
+buttonGroup.appendChild(darkModeToggle);
+
+// Auto Save New Questions Toggle
+const autoSaveButton = document.createElement('button');
+autoSaveButton.textContent = CONFIG.autoSaveNewQuestions ? "Auto Save: ON" : "Auto Save: OFF";
+autoSaveButton.classList.add('auto-save-button');
+autoSaveButton.onclick = () => {
+    CONFIG.autoSaveNewQuestions = !CONFIG.autoSaveNewQuestions;
+    autoSaveButton.textContent = CONFIG.autoSaveNewQuestions ? "Auto Save: ON" : "Auto Save: OFF";
+    saveSettings();
+};
+buttonGroup.appendChild(autoSaveButton);
+
+
+const cancelButton = document.createElement('button');
+cancelButton.textContent = "Cancel";
+cancelButton.classList.add('cancel-button');
+cancelButton.onclick = () => {
+    settingsDialog.style.display = 'none';
+};
+buttonGroup.appendChild(cancelButton);
+settingsDialog.appendChild(buttonGroup);
+
+document.body.appendChild(settingsDialog);
+}
+
+function saveSettings() {
+GM_setValue('config', JSON.stringify(CONFIG));
+}
+
+function showDatabase() {
+const db = loadDatabase();
+
+const dbDialog = document.createElement('div');
+dbDialog.id = 'ai-helper-db-dialog';
+if (CONFIG.darkMode) {
+    dbDialog.classList.add('dark-mode');
+}
+
+const dbTitle = document.createElement('h3');
+dbTitle.textContent = "Stored Database";
+dbDialog.appendChild(dbTitle);
+
+const table = document.createElement('table');
+table.style.width = '100%';
+table.style.borderCollapse = 'collapse';
+const thead = document.createElement('thead');
+const tbody = document.createElement('tbody');
+const headerRow = document.createElement('tr');
+const questionHeader = document.createElement('th');
+questionHeader.textContent = 'Question';
+questionHeader.style.border = '1px solid #ddd';
+questionHeader.style.padding = '8px';
+questionHeader.style.textAlign = "left";
+
+const answersHeader = document.createElement('th');
+answersHeader.textContent = 'Answers';
+answersHeader.style.border = '1px solid #ddd';
+answersHeader.style.padding = '8px';
+answersHeader.style.textAlign = "left";
+headerRow.appendChild(questionHeader);
+headerRow.appendChild(answersHeader);
+thead.appendChild(headerRow);
+table.appendChild(thead);
+
+for (const question in db) {
+    if (db.hasOwnProperty(question)) {
+        const row = document.createElement('tr');
+        const questionCell = document.createElement('td');
+        questionCell.textContent = question;
+        questionCell.style.border = '1px solid #ddd';
+        questionCell.style.padding = '8px';
+        const answersCell = document.createElement('td');
+        answersCell.innerHTML = db[question].join('<br>');
+        answersCell.style.border = '1px solid #ddd';
+        answersCell.style.padding = '8px';
+        row.appendChild(questionCell);
+        row.appendChild(answersCell);
+        tbody.appendChild(row);
+    }
+}
+
+table.appendChild(tbody);
+dbDialog.appendChild(table);
+
+const closeButton = document.createElement('button');
+closeButton.textContent = 'Close';
+closeButton.classList.add('close-button');
+closeButton.onclick = () => {
+    dbDialog.remove();
+};
+dbDialog.appendChild(closeButton);
+
+document.body.appendChild(dbDialog);
+}
+
+function exportDatabase() {
+const db = loadDatabase();
+const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(db));
+const downloadAnchorNode = document.createElement('a');
+downloadAnchorNode.setAttribute("href", dataStr);
+downloadAnchorNode.setAttribute("download", "learnster_qa_db.json");
+document.body.appendChild(downloadAnchorNode);
+downloadAnchorNode.click();
+downloadAnchorNode.remove();
+}
+
+function importDatabase() {
+const input = document.createElement('input');
+input.type = 'file';
+input.accept = '.json';
+input.onchange = e => {
+    const file = e.target.files[0];
+    if (file) {
+        const reader = new FileReader();
+        reader.onload = function(evt) {
+            try {
+                const importedDb = JSON.parse(evt.target.result);
+                saveDatabase(importedDb);
+                alert("Database imported successfully!");
+            } catch (error) {
+                console.error("Error importing database:", error);
+                alert("Error importing database. Make sure the file is a valid JSON file.");
+            }
+        };
+        reader.readAsText(file);
+    }
+};
+input.click();
+}
+
+function toggleDialog() {
+if (dialog) {
+    if (isMinimized) {
+        dialog.style.display = 'block';
+        isMinimized = false;
+    } else {
+        dialog.style.display = 'none';
+        isMinimized = true;
+    }
+    updateBubbleText();
+}
+}
+
+function updateBubbleText() {
+if (bubble) {
+    bubble.textContent = isMinimized ? 'AI' : 'X';
+}
+}
+
+function selectAnswersOnPage(questionWrapper, correctAnswers, isMultipleChoice) {
+if (isMultipleChoice) {
+    const checkboxes = questionWrapper.querySelectorAll('input[type="checkbox"]');
+    checkboxes.forEach(checkbox => {
+        const label = checkbox.closest('.answer-option').querySelector('p');
+        if (label) {
+            const optionText = label.textContent.trim().toLowerCase(); // Lowercase and trim for comparison
+            const answerInDb = correctAnswers.map(ans => ans.toLowerCase().trim()); // Prepare DB answers
+            const shouldCheck = answerInDb.includes(optionText);
+            checkbox.checked = shouldCheck;
+        }
+    });
+} else {
+    const radios = questionWrapper.querySelectorAll('input[type="radio"]');
+    radios.forEach(radio => {
+        const label = radio.closest('.answer-option').querySelector('p');
+        if (label) {
+            const optionText = label.textContent.trim().toLowerCase(); // Lowercase and trim for comparison
+            const answerInDb = correctAnswers.map(ans => ans.toLowerCase().trim()); // Prepare DB answers
+            const shouldCheck = answerInDb.includes(optionText);
+            radio.checked = shouldCheck;
+        }
+    });
+}
+}
+
+// === API Request and Response Handling ===
+// Enhanced API handling
+async function sendRequestToAPI(question, options, isMultipleChoice) {
+// Check cache first
+const cachedAnswer = questionCache.get(question);
+if (cachedAnswer) {
+    console.log("Using cached answer for:", question);
+     const correctAnswerFromDb = getAnswerFromDB(question); // Still check DB.
+      createDialog(question, options, cachedAnswer.join('\n'), isMultipleChoice, correctAnswerFromDb);
+      toggleDialog();
+    return;
+}
+return new Promise((resolve, reject) => { // Wrap GM_xmlhttpRequest in a Promise
+    Analytics.track('apiCall', { question });
+    PerformanceMonitor.start('apiCall');
+
+    const prompt = generatePrompt(question, options, isMultipleChoice);
+    GM_xmlhttpRequest({ // Use GM_xmlhttpRequest
+        url: CONFIG.apiUrl,
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${CONFIG.apiKey}`, //  Authorization header
+            'HTTP-Referer': 'https://ica.learnster.com/',   // Required by OpenRouter
+            'X-Title': 'Learnster AI Helper' //  Optional, but good practice
+        },
+        data: JSON.stringify({
+            model: CONFIG.model,  // Specify the model here
+            messages: [
+                { role: "user", content: prompt } //  OpenRouter uses "messages"
+            ],
+            // Add any other parameters you need for the model here, e.g., temperature, max_tokens
+                temperature: 0.7, // Example: Add temperature for creativity control.  Adjust as needed.
+                max_tokens: 500,  // Example.  Limit response length.  Adjust as needed! VERY IMPORTANT!
+        }),
+        onload: function(response) {
+            PerformanceMonitor.end('apiCall');
+            if (response.status >= 200 && response.status < 300) {
+                try {
+                    const data = JSON.parse(response.responseText);
+                    const aiAnswer = processAPIResponse(data); // Process the OpenRouter response
+                    const correctAnswerFromDb = getAnswerFromDB(question);
+                    createDialog(question, options, aiAnswer, isMultipleChoice, correctAnswerFromDb);
+                    toggleDialog();
+                    resolve(aiAnswer);
+                } catch (e) {
+                    console.error("Error parsing JSON response:", e);
+                    const correctAnswerFromDb = getAnswerFromDB(question);
+                    createDialog(question, options, 'Error parsing API response.', isMultipleChoice, correctAnswerFromDb);
+                    toggleDialog();
+                    reject(new AIHelperError('Error parsing API response', 'JSON_ERROR'));
+                }
+            } else {
+                console.error('API Error:', response.status, response.statusText, response.responseText);
+                const correctAnswerFromDb = getAnswerFromDB(question);
+                createDialog(question, options, 'An error occurred while connecting to the API.', isMultipleChoice, correctAnswerFromDb);
+                toggleDialog();
+                reject(new AIHelperError(`API request failed with status ${response.status}`, 'API_ERROR'));
+            }
+        },
+        onerror: function(error) {
+            PerformanceMonitor.end('apiCall');
+            console.error('GM_xmlhttpRequest Error:', error);
+            const correctAnswerFromDb = getAnswerFromDB(question);
+            createDialog(question, options, 'An error occurred while connecting to the API.', isMultipleChoice, correctAnswerFromDb);
+            toggleDialog();
+            reject(new AIHelperError('Network error during API request', 'NETWORK_ERROR'));
+        }
+    });
+});
+}
+
+// New feature: Custom prompt template
+function generatePrompt(question, options, isMultipleChoice) {
+if (CONFIG.promptTemplate) {
+    return CONFIG.promptTemplate
+        .replace('{{question}}', question)
+        .replace('{{options}}', options.join('\n'))
+        .replace('{{type}}', isMultipleChoice ? 'multiple' : 'single');
+}
+
+return `Question: ${question}\nOptions:\n${options.map((o, i) => `${i + 1}. ${o}`).join('\n')}\n${
+    isMultipleChoice ?
+    "List *all* correct answers *completely*, separated by a new line." :
+    "List the *one* correct answer *completely*."
+}`;
+}
+
+function processAPIResponse(data) {
+if (data && data.choices && Array.isArray(data.choices) && data.choices.length > 0) {
+    const firstChoice = data.choices[0];
+    if (firstChoice.message && firstChoice.message.content) {
+        return firstChoice.message.content; // Extract the text content
+    }
+}
+
+console.error("Invalid response structure:", data);
+throw new AIHelperError("Invalid response structure from API.", "INVALID_RESPONSE");
+}
+
+    // === Mutation Observer and Question Processing ===
+
+function observeMutations() {
+const observer = new MutationObserver(mutations => {
+    mutations.forEach(mutation => {
+        if (mutation.addedNodes && mutation.addedNodes.length > 0) {
+            mutation.addedNodes.forEach(node => {
+                if (node.nodeType === Node.ELEMENT_NODE && node.classList.contains('question-wrapper')) {
+                    processQuestion(node);
+                }
+            });
+        }
+    });
+});
+
+observer.observe(document.body, {
+    childList: true,
+    subtree: true
+});
+}
+
+function processQuestion(questionWrapper) {
+PerformanceMonitor.start('processQuestion');
+const questionTextElement = questionWrapper.querySelector('h3[aqa-id="questionTitle"]');
+const question = questionTextElement ? questionTextElement.textContent.trim() : '';
+const optionsElements = questionWrapper.querySelectorAll('.answer-option p');
+const options = Array.from(optionsElements).map(el => el.textContent.trim());
+const isMultipleChoice = questionWrapper.querySelector('input[type="checkbox"]') !== null;
+
+
+if (question && options.length > 0) {
+    Analytics.track('questionProcessed', { question, isMultipleChoice });
+    const correctAnswerFromDb = getAnswerFromDB(question);
+
+    if (correctAnswerFromDb) {
+        Analytics.track('correctAnswer', { question, source: 'database' });
+        selectAnswersOnPage(questionWrapper, correctAnswerFromDb, isMultipleChoice);
+
+        // Auto-submit if enabled
+        if (CONFIG.autoSubmit) {
+            const submitButton = document.querySelector('button[data-testid="test-submit-button"]');
+            if (submitButton) {
+              setTimeout(() => {
+                 submitButton.click();
+              }, 500); // Delay to allow for UI updates.
+
+            }
+        }
+        createDialog(question, options, '', isMultipleChoice, correctAnswerFromDb);
+        toggleDialog();
+
+
+    } else {
+      // No DB answer, use API.
+        sendRequestToAPI(question, options, isMultipleChoice)
+        .then(aiResponse => { // Added .then to handle successful API response
+            const answersArray = isMultipleChoice ? aiResponse.split('\n').filter(s => s.trim() !== "") : [aiResponse]; // Convert response to an array of answers
+            storeAnswerInDB(question, answersArray); // Automatically save the answer in the database
+            createDialog(question, options, aiResponse, isMultipleChoice, null); // No database answer initially
+            toggleDialog();
+        })
+        .catch(error => {
+            // Centralized error handling (already in sendRequestToAPI)
+        });
+    }
+}
+PerformanceMonitor.end('processQuestion');
+}
+
+// === Initialization ===
+loadSettings(); // Load settings on startup
+createBubble();
+observeMutations();
+})();

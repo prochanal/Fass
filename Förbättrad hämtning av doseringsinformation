@@ -1,0 +1,691 @@
+// ==UserScript==
+// @name         FASS.se Doseringshjälp (Förbättrad) - OpenRouter - Svensk Version
+// @namespace    http://tampermonkey.net/
+// @version      2.2
+// @description  Förbättrad hämtning av doseringsinformation, optimerad för hastighet. Visar rådata för felsökning.
+// @author       You
+// @match        https://www.fass.se/LIF/product*
+// @match        https://www.fass.se/LIF/medicinebundle*
+// @grant        GM_xmlhttpRequest
+// @grant        GM_addStyle
+// ==/UserScript==
+
+(function() {
+    'use strict';
+
+    // --- Konfiguration ---
+    const OPENROUTER_API_KEY = "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"; // Ersätt med din riktiga nyckel
+    const OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions";
+    const MODEL_NAME = "google/gemini-2.0-flash-lite-preview-02-05:free";
+
+
+    // --- CSS --- (Samma som tidigare, inkluderat för fullständighet)
+    GM_addStyle(`
+       /* ... (Din CSS-kod här) ... */
+       /* Kombinerad och rensad CSS - Nu med kompakt som standard */
+        #toggleButton {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            width: 60px;
+            height: 60px;
+            background-color: #0066CC;
+            color: white;
+            border: none;
+            border-radius: 50%;
+            cursor: pointer;
+            font-size: 24px;
+            z-index: 10000;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+            transition: transform 0.3s ease;
+        }
+
+        #toggleButton:hover {
+            transform: scale(1.1);
+        }
+
+        #calculator {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            width: 350px;
+            background: white;
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.15);
+            z-index: 10000;
+            display: none;
+            border: 2px solid #0066CC;
+            font-family: Arial, sans-serif;
+            overflow-y: auto;
+            max-height: 85vh;
+            transition: all 0.3s ease;
+        }
+
+        #calculator.dragging {
+            opacity: 0.8;
+            cursor: move;
+        }
+
+        #closeButton {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: none;
+            border: none;
+            font-size: 24px;
+            cursor: pointer;
+            color: #0066CC;
+            transition: color 0.3s ease;
+        }
+
+        #closeButton:hover {
+            color: #004999;
+        }
+
+        .info-section {
+            margin-bottom: 18px;
+            padding: 12px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            border-left: 4px solid #0066CC;
+            transition: all 0.3s ease;
+        }
+        /* Kompakt stil som standard */
+        .info-section.compact {
+            padding: 8px;
+            margin-bottom: 10px;
+        }
+
+        .info-section.compact .info-title {
+            font-size: 12px;
+            margin-bottom: 4px;
+        }
+
+        .info-section.compact .info-content {
+            font-size: 13px;
+             line-height: 1.2; /* Tätare radavstånd */
+        }
+
+        .info-title {
+            font-weight: bold;
+            color: #0066CC;
+            margin-bottom: 8px;
+            font-size: 14px;
+        }
+
+        .input-group {
+            margin-bottom: 15px;
+        }
+
+        .input-group label {
+            display: block;
+            margin-bottom: 6px;
+            font-weight: bold;
+            color: #333;
+        }
+
+        .input-group input {
+            width: 90%;
+            padding: 10px;
+            border: 2px solid #ddd;
+            border-radius: 6px;
+            transition: border-color 0.3s ease;
+        }
+
+        .input-group input:focus {
+            border-color: #0066CC;
+            outline: none;
+        }
+
+        #result {
+            margin-top: 15px;
+            padding: 12px;
+            background: #e6f3ff;
+            border-radius: 6px;
+            font-weight: bold;
+            text-align: center;
+        }
+
+        .divider {
+            margin: 20px 0;
+            border-top: 2px solid #eee;
+        }
+
+        .error {
+            color: #dc3545;
+            font-weight: bold;
+            padding: 8px;
+            background: #fff5f5;
+            border-radius: 4px;
+        }
+
+        .dose-info {
+            white-space: pre-line;
+            line-height: 1.4;
+        }
+
+        .warning {
+            color: #856404;
+            background-color: #fff3cd;
+            border: 1px solid #ffeeba;
+            padding: 8px;
+            border-radius: 4px;
+            margin-top: 5px;
+            font-size: 13px;
+        }
+
+        .view-toggle {
+            position: absolute;
+            top: 10px;
+            right: 45px;
+            padding: 5px 10px;
+            background: #0066CC;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            transition: background-color 0.3s ease;
+        }
+
+        .view-toggle:hover {
+            background: #004999;
+        }
+
+        /* Visa/dölj baserat på vald vy */
+        .compact-content {
+            display: block;  /* Visa kompakt som standard */
+        }
+
+        .detailed-content {
+            display: none; /* Dölj detaljerad initialt */
+        }
+
+        .info-section.compact .compact-content {
+            display: block;
+        }
+
+        .info-section.compact .detailed-content {
+            display: none;
+        }
+
+        .info-section:not(.compact) .compact-content {
+             display: none;
+        }
+        .info-section:not(.compact) .detailed-content{
+            display: block;
+        }
+
+        /* Loading spinner styles */
+        .loading-spinner {
+            border: 4px solid #f3f3f3; /* Light grey */
+            border-top: 4px solid #3498db; /* Blue */
+            border-radius: 50%;
+            width: 20px;
+            height: 20px;
+            animation: spin 2s linear infinite;
+            display: inline-block; /* Make it appear next to text */
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    `);
+
+    // --- Förbättrad fetchFromOpenRouter med retry och exponentiell backoff ---
+    async function fetchFromOpenRouter(prompt) {
+        let retries = 3; // Max antal försök
+        let delay = 1000; // Startfördröjning i millisekunder (1 sekund)
+
+        while (retries > 0) {
+            try {
+                const response = await new Promise((resolve, reject) => {
+                    GM_xmlhttpRequest({
+                        method: "POST",
+                        url: OPENROUTER_API_URL,
+                        headers: {
+                            "Content-Type": "application/json",
+                            "Authorization": `Bearer ${OPENROUTER_API_KEY}`,
+                            "HTTP-Referer": "https://www.fass.se",
+                            "X-Title": "FASS Doseringshjälp"
+                        },
+                        data: JSON.stringify({
+                            model: MODEL_NAME,
+                            messages: [
+                                { role: "user", content: prompt }
+                            ],
+                        }),
+                        onload: resolve,
+                        onerror: reject,
+                    });
+                });
+
+                if (response.status !== 200) {
+                    // Check for specific rate limit error (status 429)
+                    if (response.status === 429) {
+                        throw new Error(`Rate limited! Status: ${response.status} - ${response.statusText}`);
+                    }
+                    throw new Error(`API-fel: ${response.status} - ${response.statusText}`);
+                }
+
+                const data = JSON.parse(response.responseText);
+                return data.choices[0].message.content;
+
+            } catch (error) {
+                console.error("Fel vid API-anrop:", error);
+                retries--;
+                if (retries === 0) {
+                    return `<span class="error">Fel: ${error.message} - Kunde inte hämta data efter flera försök.</span>`;
+                }
+                console.log(`Försöker igen om ${delay / 1000} sekunder...`);
+                await new Promise(resolve => setTimeout(resolve, delay));
+                delay *= 2; // Dubblera fördröjningen för varje försök (exponentiell backoff)
+            }
+        }
+    }
+
+
+    // --- Funktion för att hämta cachad data eller göra API-anrop ---
+    async function getCachedData(key, fetchFunction, ...args) {
+        const cached = localStorage.getItem(key);
+        if (cached) {
+            try {
+                return JSON.parse(cached); // Försök parsa JSON
+            } catch (error) {
+                console.error("Fel vid parsing av cachad data:", error);
+                localStorage.removeItem(key); // Ta bort felaktig cachad data
+                // Fortsätt för att hämta via API
+            }
+        }
+
+        const data = await fetchFunction(...args);
+        try {
+            localStorage.setItem(key, JSON.stringify(data)); // Spara som JSON
+        }
+        catch (error){
+            console.error("Ett fel inträffade", error);
+        }
+        return data;
+    }
+
+
+    // --- Funktioner för informationshämtning (samma som tidigare, optimerade prompts) ---
+    async function getDosageDetailed(medicineName) {
+      const prompt = `Analysera ${medicineName} och ge en exakt doseringsöversikt på svenska i följande format:
+      1. Standarddos för vuxna (exakta nummer)
+      2. Barndos om tillämpligt (exakta nummer)
+      3. Administreringsfrekvens
+      4. Särskilda anvisningar om sådana finns
+
+      Svara i ett strukturerat format som:
+      "Vuxna: [exakt dos] var [frekvens]
+      Barn: [exakt dos] var [frekvens]
+      Särskilda anvisningar: [om några]"`;
+      return await fetchFromOpenRouter(prompt);
+  }
+
+  async function getDosageCompact(medicineName) {
+      const prompt = `För ${medicineName}, ge ENDAST den mest väsentliga doseringsinformationen på svenska i en enda rad:
+      Format: "Vuxen: [dos], Barn: [dos]" eller "Standard: [dos]"
+      Håll det under 50 tecken om möjligt.`;
+
+      return await fetchFromOpenRouter(prompt);
+  }
+
+  async function getMinimumAge(medicineName) {
+      const prompt = `För ${medicineName}, svara ENDAST med:
+      1. Minimiåldern i år (endast nummer)
+      2. Om det inte finns eller är kontraindicerat för barn, svara "Ej för barn"
+      3. Om ingen tydlig åldersgräns finns, svara "Alla åldrar"
+
+      Svarsformat: Bara åldersnumret följt av "år" ELLER ett av de alternativa svaren. Svara på svenska, Håll det under 50 tecken om möjligt.`;
+
+      let response = await fetchFromOpenRouter(prompt);
+      return response.toLowerCase().includes('år') ? response : response + ' år';
+  }
+
+    async function getMaxDosePerKg(medicineName) {
+    const prompt = `För ${medicineName}, svara ABSOLUT ENDAST med ETT av följande, i STRIKT prioritetsordning:
+    1. Om en EXPLICIT, SÄKER, MAXIMAL dygnsdos per kg kroppsvikt finns angiven, och denna dos INTE är en "rekommenderad dos" utan en ABSOLUT GRÄNS, ange den. Svara EXAKT med detta värde och enhet (mg/kg/dag).
+    2. Om ett DOSINTERVALL per kg/dygn finns, och detta intervall representerar en SÄKER, MAXIMAL dygnsdos (INTE en rekommenderad dos), ange det HÖGSTA värdet i intervallet, med enhet (mg/kg/dag).
+    3. Om det finns SEPARATA, SÄKRA, MAXIMALA doser för laddningsdos och underhållsdos, ange dem EXAKT som "Laddning: X mg/kg/dag, Underhåll: Y mg/kg/dag".
+    4. Om ingen maxdos per kg finns, men en ABSOLUT, SÄKER, MAXIMAL TOTAL dygnsdos finns (oavsett vikt), ange den som "Max Z mg/dag".
+    5. Om INGET av ovanstående finns, svara "Ingen maxgräns angiven".
+
+    IGNORERA alla "rekommenderade doser". Vi vill BARA ha den ABSOLUTA, SÄKRA, MAXIMALA dosen. Svara på svenska.`;
+
+     let response = await fetchFromOpenRouter(prompt);
+    response = response.trim();
+    return response; // Returnera rått svar
+
+}
+
+  async function getDosePerKg(medicineName) {
+      const prompt = `För ${medicineName}, ge ENDAST:
+      1. Standarddos per kg i mg/kg på svenska
+      2. Om olika för olika tillstånd, lista endast primär indikation
+      3. Måste inkludera numeriskt värde och enhet (mg/kg)
+      4. Om ej hittat, svara "Ej viktbaserad dosering"
+
+      Format: "[nummer] mg/kg" eller "Ej viktbaserad dosering". Svara på svenska.`;
+
+      let response = await fetchFromOpenRouter(prompt);
+      const mgkgMatch = response.match(/([\d.]+)\s*mg\/kg/i);
+      return mgkgMatch ? mgkgMatch[0] : "Ej viktbaserad dosering";
+  }
+
+  async function getAdministrationMethod(medicineName) {
+      const prompt = `För ${medicineName}, ge ENDAST:
+      1. Primär administreringsväg på svenska
+      2. Om flera vägar, lista ALLA separerade med kommatecken
+      3. Inkludera specifika instruktioner om det är kritiskt
+
+      Format: Korta fraser som "Oralt" eller "Intravenöst, Intramuskulärt". Svara på svenska.`;
+
+      return await fetchFromOpenRouter(prompt);
+  }
+
+
+
+    // --- Kalkylatorfunktioner (samma som tidigare) ---
+     function calculateDose() {
+        const weight = parseFloat(document.getElementById('weightInput').value);
+        const dosePerKg = parseFloat(document.getElementById('dosePerKgInput').value);
+        const maxDosePerKgText = document.getElementById('maxDosePerKg').textContent;  //Hämta från compact ELLER detailed beroende på vy
+        const maxDosePerKgMatch = maxDosePerKgText.match(/([\d.]+)\s*mg\/kg/i);
+        const maxDosePerKg = maxDosePerKgMatch ? parseFloat(maxDosePerKgMatch[1]) : NaN;
+
+        const resultDiv = document.getElementById('result');
+
+        if (isNaN(weight) || weight <= 0) {
+            resultDiv.innerHTML = '<span class="error">Ogiltig vikt</span>';
+            return;
+        }
+        if (isNaN(dosePerKg) || dosePerKg <= 0) {
+            resultDiv.innerHTML = '<span class="error">Ogiltig dos per kg</span>';
+            return;
+        }
+
+        const calculatedDose = weight * dosePerKg;
+
+        let resultHTML = `Beräknad dos: ${calculatedDose.toFixed(2)} mg`;
+
+        if (!isNaN(maxDosePerKg) && calculatedDose > (weight * maxDosePerKg)) {
+            resultHTML += `<div class="warning">⚠️ Överskrider max rekommenderad dos (${(weight * maxDosePerKg).toFixed(2)} mg)</div>`;
+        }
+
+        resultDiv.innerHTML = resultHTML;
+    }
+
+
+    // --- UI-inställning (samma som tidigare) ---
+   const calculator = document.createElement('div');
+    calculator.id = 'calculator';
+    calculator.innerHTML = `
+        <button id="closeButton">×</button>
+        <button id="viewToggle" class="view-toggle">Visa Detaljerad</button>
+        <div class="info-section compact">
+            <div class="info-title">Läkemedelsnamn:</div>
+            <div id="medicineName">
+                <div class="detailed-content"></div>
+                <div class="compact-content"></div>
+            </div>
+        </div>
+        <div class="info-section compact">
+            <div class="info-title">Dosering:</div>
+            <div id="dosege">
+                <div class="detailed-content"></div>
+                <div class="compact-content"></div>
+            </div>
+            <div class="loading-indicator" style="display: none;"></div>
+        </div>
+        <div class="info-section compact">
+            <div class="info-title">Minsta ålder:</div>
+            <div id="minAge">
+                <div class="detailed-content"></div>
+                <div class="compact-content"></div>
+            </div>
+        </div>
+        <div class="info-section compact">
+            <div class="info-title">Administreringssätt:</div>
+            <div id="adminMethod">
+                <div class="detailed-content"></div>
+                <div class="compact-content"></div>
+            </div>
+        </div>
+        <div class="info-section compact">
+            <div class="info-title">Max dos:</div>
+            <div id="maxDosePerKg">
+                <div class="detailed-content"></div>
+                <div class="compact-content"></div>
+            </div>
+        </div>
+        <div class="divider"></div>
+        <div class="input-group">
+            <label>Patientvikt (kg):</label>
+            <input type="number" id="weightInput" step="0.1" min="0">
+        </div>
+        <div class="input-group">
+            <label>Dos per kg:</label>
+            <input type="number" id="dosePerKgInput" step="0.01" min="0">
+        </div>
+        <div id="result">Beräknad dos: --</div>
+    `;
+    const button = document.createElement('button');
+    button.id = 'toggleButton';
+    button.innerHTML = '💊';
+
+    document.body.appendChild(button);
+    document.body.appendChild(calculator);
+
+    // --- Funktion för visningsväxling (samma som tidigare) ---
+    let isCompactView = true; // Börja med kompakt vy
+
+    function toggleView() {
+        isCompactView = !isCompactView;
+        const sections = document.querySelectorAll('.info-section');
+        const toggleButton = document.getElementById('viewToggle');
+
+        sections.forEach(section => {
+            if (isCompactView) {
+                section.classList.add('compact');
+            } else {
+                section.classList.remove('compact');
+            }
+        });
+
+        toggleButton.textContent = isCompactView ? 'Visa Detaljerad' : 'Visa Kompakt';
+
+        // Re-fetch content based on the new view
+        const headerElement = document.querySelector('h1.big-header');
+        if (headerElement) {
+          const medicineName = headerElement.textContent.trim();
+          updateContent(medicineName);
+        }
+    }
+
+   // --- Asynkron och cachad updateContent ---
+    async function updateContent(medicineName) {
+         const loadingIndicator = document.querySelector('.loading-indicator');
+        if (loadingIndicator) {
+            loadingIndicator.innerHTML = '<div class="loading-spinner"></div> Laddar...';
+            loadingIndicator.style.display = 'block';
+        }
+
+       //Visa medicinens namn direkt
+       document.querySelector('#medicineName .compact-content').textContent = medicineName;
+       document.querySelector('#medicineName .detailed-content').textContent = medicineName;
+
+
+       // Hämta och visa minsta ålder direkt (exempel)
+        getMinimumAge(medicineName).then(minAge => {
+            if (isCompactView) {
+                document.querySelector('#minAge .compact-content').textContent = minAge;
+            } else {
+                document.querySelector('#minAge .detailed-content').textContent = minAge;
+            }
+        });
+
+
+        //Hämta och visa dosering stegvis
+        getDosageCompact(medicineName).then(compactDosage => {
+            if (isCompactView) {
+                 document.querySelector('#dosege .compact-content').innerHTML = `<span class="dose-info">${compactDosage}</span>`;
+             }
+        });
+
+        getDosageDetailed(medicineName).then(detailedDosage => {
+            if (!isCompactView) {
+                document.querySelector('#dosege .detailed-content').innerHTML = `<span class="dose-info">${detailedDosage}</span>`;
+            }
+        });
+
+        // ... gör samma sak för administreringssätt, maxdos, etc. ...
+
+        getAdministrationMethod(medicineName).then(adminMethod => {
+            if (isCompactView) {
+                document.querySelector('#adminMethod .compact-content').textContent = adminMethod.split(',')[0].trim();
+            } else {
+               document.querySelector('#adminMethod .detailed-content').textContent = adminMethod;
+            }
+
+        });
+
+        // Hämta maxdos (rått svar)
+        const maxDoseKey = `maxDose_${medicineName}`;
+        let maxDose = await getCachedData(maxDoseKey, getMaxDosePerKg, medicineName);
+
+        // Validera det cachade svaret.  Om det är "Ingen maxgräns angiven", hämta igen.
+            if (maxDose === "Ingen maxgräns angiven") {
+                maxDose = await getMaxDosePerKg(medicineName); // Hämta direkt (utan cache)
+                //Cache:a om det nu INTE är Ingen maxgräns.
+                if(maxDose !== "Ingen maxgräns angiven"){
+                    try {
+                        localStorage.setItem(maxDoseKey, JSON.stringify(maxDose)); // Spara som JSON
+                    }
+                    catch (error){
+                        console.error("Ett fel inträffade", error);
+                    }
+                }
+            }
+
+        // --- Visa det råa svaret FÖRST (för felsökning) ---
+        console.log("Rått svar från API (maxDose):", maxDose); // Lägg till detta
+
+        // --- Bearbeta och visa det formaterade svaret ---
+        let compactMaxDose = maxDose;  // Använd det råa svaret som utgångspunkt
+
+        // Reguljära uttryck (förbättrade, men fortfarande med viss begränsning)
+        const mgKgDagRegex = /(\d+\.?\d*)\s*mg\/kg\/dag/i;
+        const maxMgDagRegex = /max\s*(\d+\.?\d*)\s*mg\/dag/i;
+        const laddningUnderhallRegex = /laddning:\s*(\d+\.?\d*)\s*mg\/kg\/dag.+underhåll:\s*(\d+\.?\d*)\s*mg\/kg\/dag/i;
+        const onlyLaddningRegex = /laddning:\s*(\d+\.?\d*)\s*mg\/kg\/dag/i;
+
+
+        if (laddningUnderhallRegex.test(maxDose)) {
+            const match = laddningUnderhallRegex.exec(maxDose);
+            compactMaxDose = `Laddning: ${match[1]} mg/kg/dag, Underhåll: ${match[2]} mg/kg/dag`;
+        } else if (onlyLaddningRegex.test(maxDose)) {
+            const match = onlyLaddningRegex.exec(maxDose);
+            compactMaxDose = `Laddning: ${match[1]} mg/kg/dag`;
+        } else if (mgKgDagRegex.test(maxDose)) {
+            const match = mgKgDagRegex.exec(maxDose);
+            compactMaxDose = `${match[1]} mg/kg/dag`;
+        } else if (maxMgDagRegex.test(maxDose)) {
+            const match = maxMgDagRegex.exec(maxDose);
+            compactMaxDose = `Max ${match[1]} mg/dag`;
+        } else {
+            compactMaxDose = "Ingen maxgräns"; // Fallback om inget matchar
+        }
+
+
+        // Visa den bearbetade versionen
+        if (isCompactView) {
+            document.querySelector('#maxDosePerKg .compact-content').textContent = compactMaxDose;
+        } else {
+            document.querySelector('#maxDosePerKg .detailed-content').textContent = maxDose; // Visa *alltid* rådata i detaljerad vy
+        }
+
+
+
+         getDosePerKg(medicineName).then(dosePerKg => {
+            document.getElementById('dosePerKgInput').value = dosePerKg.includes('mg/kg') ? dosePerKg.split(' ')[0] : '';
+         });
+
+
+        // Hide loading indicator
+         if (loadingIndicator) {
+            loadingIndicator.style.display = 'none';
+         }
+    }
+
+
+    // --- Dragbar funktionalitet (samma som tidigare) ---
+     let isDragging = false;
+    let currentX;
+    let currentY;
+    let initialX;
+    let initialY;
+    let xOffset = 0;
+    let yOffset = 0;
+
+    calculator.addEventListener("mousedown", dragStart);
+    document.addEventListener("mousemove", drag);
+    document.addEventListener("mouseup", dragEnd);
+
+    function dragStart(e) {
+        if (e.target === calculator || e.target.parentNode === calculator) {
+            initialX = e.clientX - xOffset;
+            initialY = e.clientY - yOffset;
+            isDragging = true;
+            calculator.classList.add('dragging');
+        }
+    }
+
+    function drag(e) {
+        if (isDragging) {
+            e.preventDefault();
+            currentX = e.clientX - initialX;
+            currentY = e.clientY - initialY;
+            xOffset = currentX;
+            yOffset = currentY;
+            calculator.style.transform = `translate(${currentX}px, ${currentY}px)`;
+        }
+    }
+
+    function dragEnd() {
+        initialX = currentX;
+        initialY = currentY;
+        isDragging = false;
+        calculator.classList.remove('dragging');
+    }
+
+
+    // --- Händelselyssnare (samma som tidigare) ---
+   button.addEventListener('click', async function() {
+        const isVisible = calculator.style.display === 'block';
+        calculator.style.display = isVisible ? 'none' : 'block';
+
+        if (!isVisible) {
+            const headerElement = document.querySelector('h1.big-header');
+            if (headerElement) {
+                const medicineName = headerElement.textContent.trim();
+                // Set medicine name immediately
+                document.querySelector('#medicineName .compact-content').textContent = medicineName;
+                document.querySelector('#medicineName .detailed-content').textContent = medicineName;
+                updateContent(medicineName);
+            }
+        }
+    });
+
+    document.getElementById('closeButton').addEventListener('click', () => {
+        calculator.style.display = 'none';
+    });
+
+    document.getElementById('weightInput').addEventListener('input', calculateDose);
+    document.getElementById('dosePerKgInput').addEventListener('input', calculateDose);
+    document.getElementById('viewToggle').addEventListener('click', toggleView);
+
+})();
